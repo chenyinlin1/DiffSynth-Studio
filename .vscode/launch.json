@@ -1,0 +1,72 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Debug: Train Wan2.2-Animate-14B (single GPU)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "CUDA_VISIBLE_DEVICES": "0"
+            },
+            "args": [
+                // "--task", "sft",
+                "--dataset_base_path", "${workspaceFolder}/data",
+                "--dataset_metadata_path", "${workspaceFolder}/data/metadata_animate.csv",
+                "--data_file_keys", "video,animate_pose_video,animate_face_video",
+                "--height", "480",
+                "--width", "832",
+                "--num_frames", "81",
+                "--dataset_repeat", "100",
+                "--model_id_with_origin_paths", "Wan-AI/Wan2.2-Animate-14B:diffusion_pytorch_model*.safetensors,Wan-AI/Wan2.2-Animate-14B:models_t5_umt5-xxl-enc-bf16.pth,Wan-AI/Wan2.2-Animate-14B:Wan2.1_VAE.pth,Wan-AI/Wan2.2-Animate-14B:models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                "--learning_rate", "1e-4",
+                "--num_epochs", "5",
+                "--remove_prefix_in_ckpt", "pipe.dit.",
+                "--output_path", "${workspaceFolder}/models/train/Wan2.2-Animate-14B_lora",
+                "--lora_base_model", "dit",
+                "--lora_target_modules", "q,k,v,o,ffn.0,ffn.2",
+                "--lora_rank", "32",
+                "--extra_inputs", "input_image,animate_pose_video,animate_face_video",
+                "--use_gradient_checkpointing_offload",
+                "--gradient_accumulation_steps", "1"
+            ]
+        },
+        {
+            "name": "Debug: Inference Wan2.2-Animate-14B",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/inference_Wan2.2-Animate.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "CUDA_VISIBLE_DEVICES": "1"
+            },
+            "args": [
+                "--lora_path", "models/train/Wan2.2-Animate-14B_lora/epoch-4.safetensors",
+                // "--seed", "0",
+                "--input_image_path", "data/examples/wan/animate/animate_input_image.png",
+                "--animate_pose_video_path", "data/examples/wan/animate/animate_pose_video.mp4",
+                "--animate_face_video_path", "data/examples/wan/animate/animate_face_video.mp4",
+                "--output_video_path", "video_1_Wan2.2-Animate-14B-withoutface.mp4",
+                "--prompt", "视频中的人在做动作"
+            ]
+        }
+    ]
+}

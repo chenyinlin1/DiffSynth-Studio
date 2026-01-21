@@ -166,7 +166,7 @@ class DiffusionTrainingModule(torch.nn.Module):
                 return
             model = self.add_lora_to_model(
                 getattr(pipe, lora_base_model),
-                target_modules=lora_target_modules.split(","),
+                target_modules=lora_target_modules.split(","), # 'q,k,v,o,ffn.0,ffn.2'
                 lora_rank=lora_rank,
                 upcast_dtype=pipe.torch_dtype,
             )
@@ -185,7 +185,7 @@ class DiffusionTrainingModule(torch.nn.Module):
         if trainable_models is not None:
             models_require_backward += trainable_models.split(",")
         if lora_base_model is not None:
-            models_require_backward += [lora_base_model]
+            models_require_backward += [lora_base_model] # ['dit']
         if task.endswith(":data_process"):
             _, pipe.units = pipe.split_pipeline_units(models_require_backward)
         elif task.endswith(":train"):

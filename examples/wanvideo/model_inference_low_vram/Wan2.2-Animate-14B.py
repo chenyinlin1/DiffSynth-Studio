@@ -1,3 +1,6 @@
+import os
+os.environ["DIFFSYNTH_SKIP_DOWNLOAD"] = "False"
+os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = "/mnt/shared-storage-gpfs2/solution-gpfs02/liugaofeng/Data/model_related"
 import torch
 from PIL import Image
 from diffsynth.core import load_state_dict

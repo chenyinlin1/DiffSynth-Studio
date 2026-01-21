@@ -204,18 +204,18 @@ class FaceAdapter(nn.Module):
 
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
-        self.hidden_size = hidden_dim
-        self.heads_num = heads_num
+        self.hidden_size = hidden_dim # 40
+        self.heads_num = heads_num # 5120
         self.fuser_blocks = nn.ModuleList(
             [
                 FaceBlock(
-                    self.hidden_size,
-                    self.heads_num,
+                    self.hidden_size, # 40
+                    self.heads_num, # 5120
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
                     **factory_kwargs,
                 )
-                for _ in range(num_adapter_layers)
+                for _ in range(num_adapter_layers) # 8
             ]
         )
 
@@ -271,43 +271,43 @@ class FaceBlock(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        motion_vec: torch.Tensor,
+        x: torch.Tensor, # torch.Size([1, 32760, 5120])
+        motion_vec: torch.Tensor, # torch.Size([1, 21, 5, 5120])
         motion_mask: Optional[torch.Tensor] = None,
         use_context_parallel=False,
     ) -> torch.Tensor:
         
-        B, T, N, C = motion_vec.shape
+        B, T, N, C = motion_vec.shape # ([1, 21, 5, 5120])
         T_comp = T
 
-        x_motion = self.pre_norm_motion(motion_vec)
-        x_feat = self.pre_norm_feat(x)
+        x_motion = self.pre_norm_motion(motion_vec) # torch.Size([1, 21, 5, 5120]) -> torch.Size([1, 21, 5, 5120])
+        x_feat = self.pre_norm_feat(x) # torch.Size([1, 32760, 5120]) -> torch.Size([1, 32760, 5120])
 
-        kv = self.linear1_kv(x_motion)
-        q = self.linear1_q(x_feat)
+        kv = self.linear1_kv(x_motion) # torch.Size([1, 21, 5, 5120]) -> torch.Size([1, 21, 5, 10240])
+        q = self.linear1_q(x_feat) # torch.Size([1, 32760, 5120]) ->torch.Size([1, 32760, 5120])
 
-        k, v = rearrange(kv, "B L N (K H D) -> K B L N H D", K=2, H=self.heads_num)
-        q = rearrange(q, "B S (H D) -> B S H D", H=self.heads_num)
+        k, v = rearrange(kv, "B L N (K H D) -> K B L N H D", K=2, H=self.heads_num) # torch.Size([1, 21, 5, 10240]) -> torch.Size([1, 21, 5, 40, 128]) | torch.Size([1, 21, 5, 40, 128])
+        q = rearrange(q, "B S (H D) -> B S H D", H=self.heads_num) # torch.Size([1, 32760, 40, 128])
 
         # Apply QK-Norm if needed.
-        q = self.q_norm(q).to(v)
-        k = self.k_norm(k).to(v)
+        q = self.q_norm(q).to(v) # torch.Size([1, 32760, 40, 128]) -> torch.Size([1, 32760, 40, 128])
+        k = self.k_norm(k).to(v) # torch.Size([1, 21, 5, 40, 128]) -> torch.Size([1, 21, 5, 40, 128])
 
-        k = rearrange(k, "B L N H D -> (B L) H N D")  
-        v = rearrange(v, "B L N H D -> (B L) H N D") 
+        k = rearrange(k, "B L N H D -> (B L) H N D")   # torch.Size([21, 40, 5, 128]) -> torch.Size([21, 40, 5, 128])
+        v = rearrange(v, "B L N H D -> (B L) H N D")  # torch.Size([1, 21, 5, 40, 128]) -> torch.Size([21, 40, 5, 128])
 
-        q = rearrange(q, "B (L S) H D -> (B L) H S D", L=T_comp)  
+        q = rearrange(q, "B (L S) H D -> (B L) H S D", L=T_comp)  # torch.Size([1, 32760, 40, 128]) -> torch.Size([21, 40, 1560, 128])
         # Compute attention.
-        attn = F.scaled_dot_product_attention(q, k, v)
+        attn = F.scaled_dot_product_attention(q, k, v) # torch.Size([21, 40, 1560, 128])
 
-        attn = rearrange(attn, "(B L) H S D -> B (L S) (H D)", L=T_comp)
+        attn = rearrange(attn, "(B L) H S D -> B (L S) (H D)", L=T_comp) # torch.Size([21, 40, 1560, 128]) -> torch.Size([1, 32760, 5120])
 
-        output = self.linear2(attn)
+        output = self.linear2(attn) # torch.Size([1, 32760, 5120]) -> torch.Size([1, 32760, 5120])
 
-        if motion_mask is not None:
+        if motion_mask is not None: # None
             output = output * rearrange(motion_mask, "B T H W -> B (T H W)").unsqueeze(-1)
 
-        return output
+        return output # torch.Size([1, 32760, 5120])
 
 
 
@@ -620,31 +620,31 @@ class WanAnimateAdapter(torch.nn.Module):
         self.face_adapter = FaceAdapter(heads_num=40, hidden_dim=5120, num_adapter_layers=40 // 5)
         self.face_encoder = FaceEncoder(in_dim=512, hidden_dim=5120, num_heads=4)
     
-    def after_patch_embedding(self, x: List[torch.Tensor], pose_latents, face_pixel_values):
-        pose_latents = self.pose_patch_embedding(pose_latents)
-        x[:, :, 1:] += pose_latents
-        
-        b,c,T,h,w = face_pixel_values.shape
-        face_pixel_values = rearrange(face_pixel_values, "b c t h w -> (b t) c h w")
-
+    def after_patch_embedding(self, x: List[torch.Tensor], pose_latents, face_pixel_values): # ([1, 5120, 21, 30, 52])
+        pose_latents = self.pose_patch_embedding(pose_latents) # torch.Size([1, 16, 20, 60, 104]) -> torch.Size([1, 5120, 20, 30, 52])
+        x[:, :, 1:] += pose_latents # torch.Size([1, 5120, 21, 30, 52])
+        b,c,T,h,w = face_pixel_values.shape # (1, 3, 77, 512, 512)
+        face_pixel_values = rearrange(face_pixel_values, "b c t h w -> (b t) c h w") # torch.Size([77, 3, 512, 512]) -> torch.Size([77, 3, 512, 512])
         encode_bs = 8
         face_pixel_values_tmp = []
         for i in range(math.ceil(face_pixel_values.shape[0]/encode_bs)):
-            face_pixel_values_tmp.append(self.motion_encoder.get_motion(face_pixel_values[i*encode_bs:(i+1)*encode_bs]))
+            face_pixel_values_tmp.append(self.motion_encoder.get_motion(face_pixel_values[i*encode_bs:(i+1)*encode_bs])) # torch.Size([8, 3, 512, 512]) -> torch.Size([8, 512])
 
-        motion_vec = torch.cat(face_pixel_values_tmp)
+        motion_vec = torch.cat(face_pixel_values_tmp) # torch.Size([77, 512])
         
-        motion_vec = rearrange(motion_vec, "(b t) c -> b t c", t=T)
-        motion_vec = self.face_encoder(motion_vec)
-
-        B, L, H, C = motion_vec.shape
-        pad_face = torch.zeros(B, 1, H, C).type_as(motion_vec)
-        motion_vec = torch.cat([pad_face, motion_vec], dim=1)
-        return x, motion_vec
-    
-    def after_transformer_block(self, block_idx, x, motion_vec, motion_masks=None):
+        motion_vec = rearrange(motion_vec, "(b t) c -> b t c", t=T) # torch.Size([77, 512]) -> torch.Size([1, 77, 512])
+        motion_vec = self.face_encoder(motion_vec) # torch.Size([1, 77, 512]) -> torch.Size([1, 20, 5, 5120])
+        B, L, H, C = motion_vec.shape # ([1, 20, 5, 5120])
+        pad_face = torch.zeros(B, 1, H, C).type_as(motion_vec) # torch.Size([1, 1, 5, 5120])
+        motion_vec = torch.cat([pad_face, motion_vec], dim=1) # torch.Size([1, 21, 5, 5120])
+        return x, motion_vec # torch.Size([1, 5120, 21, 30, 52]) | torch.Size([1, 21, 5, 5120])
+    def after_patch_embedding_without_face(self, x: List[torch.Tensor], pose_latents): # ([1, 5120, 21, 30, 52])
+        pose_latents = self.pose_patch_embedding(pose_latents) # torch.Size([1, 16, 20, 60, 104]) -> torch.Size([1, 5120, 20, 30, 52])
+        x[:, :, 1:] += pose_latents # torch.Size([1, 5120, 21, 30, 52])
+        return x # torch.Size([1, 5120, 21, 30, 52])
+    def after_transformer_block(self, block_idx, x, motion_vec, motion_masks=None):# int | torch.Size([1, 32760, 5120]) | torch.Size([1, 21, 5, 5120])
         if block_idx % 5 == 0:
-            adapter_args = [x, motion_vec, motion_masks, False]
-            residual_out = self.face_adapter.fuser_blocks[block_idx // 5](*adapter_args)
-            x = residual_out + x
-        return x
+            adapter_args = [x, motion_vec, motion_masks, False] # torch.Size([1, 32760, 5120]) | torch.Size([1, 21, 5, 5120]) | None | False
+            residual_out = self.face_adapter.fuser_blocks[block_idx // 5](*adapter_args) # torch.Size([1, 32760, 5120])
+            x = residual_out + x # torch.Size([1, 32760, 5120])
+        return x # torch.Size([1, 32760, 5120])

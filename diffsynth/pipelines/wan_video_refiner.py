@@ -28,7 +28,7 @@ from ..models.wav2vec import WanS2VAudioEncoder
 from ..models.longcat_video_dit import LongCatVideoTransformer3DModel
 
 
-class WanVideoPipeline(BasePipeline):
+class WanVideoRefinerPipeline(BasePipeline):
     def __init__(self, device="cuda", torch_dtype=torch.bfloat16):
         super().__init__(
             device=device, torch_dtype=torch_dtype,
@@ -129,7 +129,7 @@ class WanVideoPipeline(BasePipeline):
             if dist.is_available() and dist.is_initialized():
                 device = get_device_name()
         # Initialize pipeline
-        pipe = WanVideoPipeline(device=device, torch_dtype=torch_dtype)
+        pipe = WanVideoRefinerPipeline(device=device, torch_dtype=torch_dtype)
         model_pool = pipe.download_and_load_models(model_configs, vram_limit)
         
         # Fetch models
@@ -340,7 +340,7 @@ class WanVideoUnit_ShapeChecker(PipelineUnit):
             output_params=("height", "width", "num_frames"),
         )
 
-    def process(self, pipe: WanVideoPipeline, height, width, num_frames):
+    def process(self, pipe: WanVideoRefinerPipeline, height, width, num_frames):
         height, width, num_frames = pipe.check_resize_height_width(height, width, num_frames)
         return {"height": height, "width": width, "num_frames": num_frames}
 
@@ -353,7 +353,7 @@ class WanVideoUnit_NoiseInitializer(PipelineUnit):
             output_params=("noise",)
         )
 
-    def process(self, pipe: WanVideoPipeline, height, width, num_frames, seed, rand_device, vace_reference_image):
+    def process(self, pipe: WanVideoRefinerPipeline, height, width, num_frames, seed, rand_device, vace_reference_image):
         length = (num_frames - 1) // 4 + 1
         if vace_reference_image is not None:
             f = len(vace_reference_image) if isinstance(vace_reference_image, list) else 1
@@ -374,7 +374,7 @@ class WanVideoUnit_InputVideoEmbedder(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_video, noise, tiled, tile_size, tile_stride, vace_reference_image):
+    def process(self, pipe: WanVideoRefinerPipeline, input_video, noise, tiled, tile_size, tile_stride, vace_reference_image):
         if input_video is None: # 81
             return {"latents": noise}
         pipe.load_models_to_device(self.onload_model_names)
@@ -404,7 +404,7 @@ class WanVideoUnit_PromptEmbedder(PipelineUnit):
             onload_model_names=("text_encoder",)
         )
     
-    def encode_prompt(self, pipe: WanVideoPipeline, prompt):
+    def encode_prompt(self, pipe: WanVideoRefinerPipeline, prompt):
         ids, mask = pipe.tokenizer(prompt, return_mask=True, add_special_tokens=True)
         ids = ids.to(pipe.device)
         mask = mask.to(pipe.device)
@@ -414,7 +414,7 @@ class WanVideoUnit_PromptEmbedder(PipelineUnit):
             prompt_emb[:, v:] = 0
         return prompt_emb
 
-    def process(self, pipe: WanVideoPipeline, prompt, positive) -> dict:
+    def process(self, pipe: WanVideoRefinerPipeline, prompt, positive) -> dict:
         pipe.load_models_to_device(self.onload_model_names)
         prompt_emb = self.encode_prompt(pipe, prompt)
         return {"context": prompt_emb}
@@ -429,7 +429,7 @@ class WanVideoUnit_ImageEmbedderCLIP(PipelineUnit):
             onload_model_names=("image_encoder",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, end_image, height, width):
+    def process(self, pipe: WanVideoRefinerPipeline, input_image, end_image, height, width):
         if input_image is None or pipe.image_encoder is None or not pipe.dit.require_clip_embedding:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -452,7 +452,7 @@ class WanVideoUnit_ImageEmbedderVAE(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoRefinerPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride):
         if input_image is None or not pipe.dit.require_vae_embedding:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -490,7 +490,7 @@ class WanVideoUnit_ImageEmbedderFused(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, latents, height, width, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoRefinerPipeline, input_image, latents, height, width, tiled, tile_size, tile_stride):
         if input_image is None or not pipe.dit.fuse_vae_embedding_in_latents:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -509,7 +509,7 @@ class WanVideoUnit_FunControl(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, control_video, num_frames, height, width, tiled, tile_size, tile_stride, clip_feature, y, latents):
+    def process(self, pipe: WanVideoRefinerPipeline, control_video, num_frames, height, width, tiled, tile_size, tile_stride, clip_feature, y, latents):
         if control_video is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -535,7 +535,7 @@ class WanVideoUnit_FunReference(PipelineUnit):
             onload_model_names=("vae", "image_encoder")
         )
 
-    def process(self, pipe: WanVideoPipeline, reference_image, height, width):
+    def process(self, pipe: WanVideoRefinerPipeline, reference_image, height, width):
         if reference_image is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -558,7 +558,7 @@ class WanVideoUnit_FunCameraControl(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, height, width, num_frames, camera_control_direction, camera_control_speed, camera_control_origin, latents, input_image, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoRefinerPipeline, height, width, num_frames, camera_control_direction, camera_control_speed, camera_control_origin, latents, input_image, tiled, tile_size, tile_stride):
         if camera_control_direction is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -608,7 +608,7 @@ class WanVideoUnit_SpeedControl(PipelineUnit):
             output_params=("motion_bucket_id",)
         )
 
-    def process(self, pipe: WanVideoPipeline, motion_bucket_id):
+    def process(self, pipe: WanVideoRefinerPipeline, motion_bucket_id):
         if motion_bucket_id is None:
             return {}
         motion_bucket_id = torch.Tensor((motion_bucket_id,)).to(dtype=pipe.torch_dtype, device=pipe.device)
@@ -626,7 +626,7 @@ class WanVideoUnit_VACE(PipelineUnit):
 
     def process(
         self,
-        pipe: WanVideoPipeline,
+        pipe: WanVideoRefinerPipeline,
         vace_video, vace_video_mask, vace_reference_image, vace_scale,
         height, width, num_frames,
         tiled, tile_size, tile_stride
@@ -688,7 +688,7 @@ class WanVideoUnit_VAP(PipelineUnit):
             output_params=("vap_clip_feature", "vap_hidden_state", "context_vap")
         )
         
-    def encode_prompt(self, pipe: WanVideoPipeline, prompt):
+    def encode_prompt(self, pipe: WanVideoRefinerPipeline, prompt):
         ids, mask = pipe.tokenizer(prompt, return_mask=True, add_special_tokens=True)
         ids = ids.to(pipe.device)
         mask = mask.to(pipe.device)
@@ -698,7 +698,7 @@ class WanVideoUnit_VAP(PipelineUnit):
             prompt_emb[:, v:] = 0
         return prompt_emb
 
-    def process(self, pipe: WanVideoPipeline, inputs_shared, inputs_posi, inputs_nega):
+    def process(self, pipe: WanVideoRefinerPipeline, inputs_shared, inputs_posi, inputs_nega):
         if inputs_shared.get("vap_video") is None:
             return inputs_shared, inputs_posi, inputs_nega
         else:
@@ -761,7 +761,7 @@ class WanVideoUnit_UnifiedSequenceParallel(PipelineUnit):
     def __init__(self):
         super().__init__(input_params=(), output_params=("use_unified_sequence_parallel",))
 
-    def process(self, pipe: WanVideoPipeline):
+    def process(self, pipe: WanVideoRefinerPipeline):
         if hasattr(pipe, "use_unified_sequence_parallel"):
             if pipe.use_unified_sequence_parallel:
                 return {"use_unified_sequence_parallel": True}
@@ -778,7 +778,7 @@ class WanVideoUnit_TeaCache(PipelineUnit):
             output_params=("tea_cache",)
         )
 
-    def process(self, pipe: WanVideoPipeline, num_inference_steps, tea_cache_l1_thresh, tea_cache_model_id):
+    def process(self, pipe: WanVideoRefinerPipeline, num_inference_steps, tea_cache_l1_thresh, tea_cache_model_id):
         if tea_cache_l1_thresh is None:
             return {}
         return {"tea_cache": TeaCache(num_inference_steps, rel_l1_thresh=tea_cache_l1_thresh, model_id=tea_cache_model_id)}
@@ -790,7 +790,7 @@ class WanVideoUnit_CfgMerger(PipelineUnit):
         super().__init__(take_over=True)
         self.concat_tensor_names = ["context", "clip_feature", "y", "reference_latents"]
 
-    def process(self, pipe: WanVideoPipeline, inputs_shared, inputs_posi, inputs_nega):
+    def process(self, pipe: WanVideoRefinerPipeline, inputs_shared, inputs_posi, inputs_nega):
         if not inputs_shared["cfg_merge"]:
             return inputs_shared, inputs_posi, inputs_nega
         for name in self.concat_tensor_names:
@@ -815,7 +815,7 @@ class WanVideoUnit_S2V(PipelineUnit):
             output_params=("audio_embeds", "motion_latents", "drop_motion_frames", "s2v_pose_latents"),
         )
 
-    def process_audio(self, pipe: WanVideoPipeline, input_audio, audio_sample_rate, num_frames, fps=16, audio_embeds=None, return_all=False):
+    def process_audio(self, pipe: WanVideoRefinerPipeline, input_audio, audio_sample_rate, num_frames, fps=16, audio_embeds=None, return_all=False):
         if audio_embeds is not None:
             return {"audio_embeds": audio_embeds}
         pipe.load_models_to_device(["audio_encoder"])
@@ -825,7 +825,7 @@ class WanVideoUnit_S2V(PipelineUnit):
         else:
             return {"audio_embeds": audio_embeds[0]}
 
-    def process_motion_latents(self, pipe: WanVideoPipeline, height, width, tiled, tile_size, tile_stride, motion_video=None):
+    def process_motion_latents(self, pipe: WanVideoRefinerPipeline, height, width, tiled, tile_size, tile_stride, motion_video=None):
         pipe.load_models_to_device(["vae"])
         motion_frames = 73
         kwargs = {}
@@ -840,7 +840,7 @@ class WanVideoUnit_S2V(PipelineUnit):
         kwargs.update({"motion_latents": motion_latents})
         return kwargs
 
-    def process_pose_cond(self, pipe: WanVideoPipeline, s2v_pose_video, num_frames, height, width, tiled, tile_size, tile_stride, s2v_pose_latents=None, num_repeats=1, return_all=False):
+    def process_pose_cond(self, pipe: WanVideoRefinerPipeline, s2v_pose_video, num_frames, height, width, tiled, tile_size, tile_stride, s2v_pose_latents=None, num_repeats=1, return_all=False):
         if s2v_pose_latents is not None:
             return {"s2v_pose_latents": s2v_pose_latents}
         if s2v_pose_video is None:
@@ -863,7 +863,7 @@ class WanVideoUnit_S2V(PipelineUnit):
         else:
             return {"s2v_pose_latents": pose_conds[0]}
 
-    def process(self, pipe: WanVideoPipeline, inputs_shared, inputs_posi, inputs_nega):
+    def process(self, pipe: WanVideoRefinerPipeline, inputs_shared, inputs_posi, inputs_nega):
         if (inputs_shared.get("input_audio") is None and inputs_shared.get("audio_embeds") is None) or pipe.audio_encoder is None or pipe.audio_processor is None:
             return inputs_shared, inputs_posi, inputs_nega
         num_frames, height, width, tiled, tile_size, tile_stride = inputs_shared.get("num_frames"), inputs_shared.get("height"), inputs_shared.get("width"), inputs_shared.get("tiled"), inputs_shared.get("tile_size"), inputs_shared.get("tile_stride")
@@ -879,7 +879,7 @@ class WanVideoUnit_S2V(PipelineUnit):
         return inputs_shared, inputs_posi, inputs_nega
 
     @staticmethod
-    def pre_calculate_audio_pose(pipe: WanVideoPipeline, input_audio=None, audio_sample_rate=16000, s2v_pose_video=None, num_frames=81, height=448, width=832, fps=16, tiled=True, tile_size=(30, 52), tile_stride=(15, 26)):
+    def pre_calculate_audio_pose(pipe: WanVideoRefinerPipeline, input_audio=None, audio_sample_rate=16000, s2v_pose_video=None, num_frames=81, height=448, width=832, fps=16, tiled=True, tile_size=(30, 52), tile_stride=(15, 26)):
         assert pipe.audio_encoder is not None and pipe.audio_processor is not None, "Please load audio encoder and audio processor first."
         shapes = WanVideoUnit_ShapeChecker().process(pipe, height, width, num_frames)
         height, width, num_frames = shapes["height"], shapes["width"], shapes["num_frames"]
@@ -894,7 +894,7 @@ class WanVideoPostUnit_S2V(PipelineUnit):
     def __init__(self):
         super().__init__(input_params=("latents", "motion_latents", "drop_motion_frames"))
 
-    def process(self, pipe: WanVideoPipeline, latents, motion_latents, drop_motion_frames):
+    def process(self, pipe: WanVideoRefinerPipeline, latents, motion_latents, drop_motion_frames):
         if pipe.audio_encoder is None or motion_latents is None or drop_motion_frames:
             return {}
         latents = torch.cat([motion_latents, latents[:,:,1:]], dim=2)
@@ -908,7 +908,7 @@ class WanVideoUnit_AnimateVideoSplit(PipelineUnit):
             output_params=("animate_pose_video", "animate_face_video", "animate_inpaint_video", "animate_mask_video")
         )
 
-    def process(self, pipe: WanVideoPipeline, input_video, animate_pose_video, animate_face_video, animate_inpaint_video, animate_mask_video):
+    def process(self, pipe: WanVideoRefinerPipeline, input_video, animate_pose_video, animate_face_video, animate_inpaint_video, animate_mask_video):
         if input_video is None:
             return {}
         if animate_pose_video is not None: # 81
@@ -930,7 +930,7 @@ class WanVideoUnit_AnimatePoseLatents(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, animate_pose_video, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoRefinerPipeline, animate_pose_video, tiled, tile_size, tile_stride):
         if animate_pose_video is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -947,7 +947,7 @@ class WanVideoUnit_AnimateFacePixelValues(PipelineUnit):
             output_params=("face_pixel_values"),
         )
 
-    def process(self, pipe: WanVideoPipeline, inputs_shared, inputs_posi, inputs_nega):
+    def process(self, pipe: WanVideoRefinerPipeline, inputs_shared, inputs_posi, inputs_nega):
         if inputs_shared.get("animate_face_video", None) is None:
             return inputs_shared, inputs_posi, inputs_nega
         inputs_posi["face_pixel_values"] = pipe.preprocess_video(inputs_shared["animate_face_video"]) # torch.Size([1, 3, 77, 512, 512])
@@ -974,7 +974,7 @@ class WanVideoUnit_AnimateInpaint(PipelineUnit):
         msk = msk.transpose(1, 2)[0]
         return msk
 
-    def process(self, pipe: WanVideoPipeline, animate_inpaint_video, animate_mask_video, input_image, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoRefinerPipeline, animate_inpaint_video, animate_mask_video, input_image, tiled, tile_size, tile_stride):
         if animate_inpaint_video is None or animate_mask_video is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -1007,7 +1007,7 @@ class WanVideoUnit_LongCatVideo(PipelineUnit):
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, longcat_video):
+    def process(self, pipe: WanVideoRefinerPipeline, longcat_video):
         if longcat_video is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
@@ -1258,7 +1258,8 @@ def model_fn_wan_video(
     # Animate
     if pose_latents is not None and face_pixel_values is not None: # torch.Size([1, 16, 20, 60, 104]) | torch.Size([1, 3, 77, 512, 512])
         x, motion_vec = animate_adapter.after_patch_embedding(x, pose_latents, face_pixel_values) # torch.Size([1, 5120, 21, 30, 52]) | torch.Size([1, 21, 5, 5120])
-    
+    elif pose_latents is not None:
+        x = animate_adapter.after_patch_embedding_without_face(x, pose_latents) # torch.Size([1, 5120, 21, 30, 52])
     # Patchify
     f, h, w = x.shape[2:]
     x = rearrange(x, 'b c f h w -> b (f h w) c').contiguous() # torch.Size([1, 5120, 21, 30, 52]) -> torch.Size([1, 32760, 5120])

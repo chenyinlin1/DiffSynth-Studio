@@ -215,17 +215,17 @@ class DiTBlock(nn.Module):
         chunk_dim = 2 if has_seq else 1
         # msa: multi-head self-attention  mlp: multi-layer perceptron
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=chunk_dim)
-        if has_seq:
+            self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=chunk_dim) # torch.Size([1, 1, 5120]) | torch.Size([1, 1, 5120]) | torch.Size([1, 1, 5120]) | torch.Size([1, 1, 5120]) | torch.Size([1, 1, 5120]) | torch.Size([1, 1, 5120])
+        if has_seq: # False
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
                 shift_msa.squeeze(2), scale_msa.squeeze(2), gate_msa.squeeze(2),
                 shift_mlp.squeeze(2), scale_mlp.squeeze(2), gate_mlp.squeeze(2),
             )
-        input_x = modulate(self.norm1(x), shift_msa, scale_msa)
-        x = self.gate(x, gate_msa, self.self_attn(input_x, freqs))
-        x = x + self.cross_attn(self.norm3(x), context)
+        input_x = modulate(self.norm1(x), shift_msa, scale_msa) # torch.Size([1, 32760, 5120])
+        x = self.gate(x, gate_msa, self.self_attn(input_x, freqs)) # torch.Size([1, 32760, 5120])
+        x = x + self.cross_attn(self.norm3(x), context) # torch.Size([1, 32760, 5120])
         input_x = modulate(self.norm2(x), shift_mlp, scale_mlp)
-        x = self.gate(x, gate_mlp, self.ffn(input_x))
+        x = self.gate(x, gate_mlp, self.ffn(input_x)) # torch.Size([1, 32760, 5120])
         return x
 
 
@@ -296,7 +296,7 @@ class WanModel(torch.nn.Module):
         self.in_dim = in_dim
         self.freq_dim = freq_dim
         self.has_image_input = has_image_input
-        self.patch_size = patch_size
+        self.patch_size = patch_size #  [1, 2, 2]
         self.seperated_timestep = seperated_timestep
         self.require_vae_embedding = require_vae_embedding
         self.require_clip_embedding = require_clip_embedding
@@ -343,12 +343,12 @@ class WanModel(torch.nn.Module):
             x = x[0].unsqueeze(0)
         return x
 
-    def unpatchify(self, x: torch.Tensor, grid_size: torch.Tensor):
+    def unpatchify(self, x: torch.Tensor, grid_size: torch.Tensor): # torch.Size([1, 32760, 64]) | (21, 30, 52)
         return rearrange(
             x, 'b (f h w) (x y z c) -> b c (f x) (h y) (w z)',
             f=grid_size[0], h=grid_size[1], w=grid_size[2], 
             x=self.patch_size[0], y=self.patch_size[1], z=self.patch_size[2]
-        )
+        ) # 
 
     def forward(self,
                 x: torch.Tensor,

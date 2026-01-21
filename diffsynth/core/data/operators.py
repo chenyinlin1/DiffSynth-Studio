@@ -65,7 +65,7 @@ class LoadImage(DataProcessingOperator):
 
 
 class ImageCropAndResize(DataProcessingOperator):
-    def __init__(self, height=None, width=None, max_pixels=None, height_division_factor=1, width_division_factor=1):
+    def __init__(self, height=None, width=None, max_pixels=None, height_division_factor=1, width_division_factor=1): # (512, 512, None, 16, 16
         self.height = height
         self.width = width
         self.max_pixels = max_pixels
